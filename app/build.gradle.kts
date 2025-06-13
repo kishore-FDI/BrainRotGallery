@@ -2,9 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    id("org.jetbrains.kotlin.kapt") // <-- add this line
+    id("org.jetbrains.kotlin.kapt")
 }
-
 
 android {
     namespace = "com.example.myapplication"
@@ -29,20 +28,31 @@ android {
             )
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
     kotlinOptions {
         jvmTarget = "11"
     }
+
     buildFeatures {
         compose = true
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
-dependencies {
 
+val youtubedlVersion = "0.17.4"
+
+dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -58,6 +68,10 @@ dependencies {
     implementation(libs.room.ktx)
     implementation("androidx.activity:activity-ktx:1.9.0")
 
+    implementation("io.github.junkfood02.youtubedl-android:library:$youtubedlVersion")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlVersion")
+    implementation("io.github.junkfood02.youtubedl-android:aria2c:$youtubedlVersion")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -65,5 +79,4 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
-
 }
