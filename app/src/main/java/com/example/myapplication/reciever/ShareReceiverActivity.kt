@@ -1,4 +1,4 @@
-package com.example.myapplication
+package com.example.myapplication.reciever
 
 import android.content.Intent
 import android.os.Bundle
@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.example.myapplication.worker.VideoDownloadWorker
 
 class ShareReceiverActivity : ComponentActivity() {
 

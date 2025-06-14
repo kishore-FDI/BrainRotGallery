@@ -1,19 +1,24 @@
-package com.example.myapplication
+package com.example.myapplication.worker
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.media.MediaScannerConnection
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.datastore.preferences.core.edit
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import com.example.myapplication.R
+import com.example.myapplication.data.AppDatabase
+import com.example.myapplication.data.LinkEntity
+import com.example.myapplication.data.SettingsDataStore
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
@@ -44,7 +49,6 @@ class VideoDownloadWorker(
         val notifId = videoUrl.hashCode()
 
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
@@ -64,13 +68,20 @@ class VideoDownloadWorker(
         manager.notify(notifId, builder.build())
 
         return try {
-            // 👉 Use root of Downloads folder
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val downloadsDir =
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
 
-            val request = YoutubeDLRequest(videoUrl)
-            request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4")
-            request.addOption("--merge-output-format", "mp4")
-            request.addOption("-o", "${downloadsDir.absolutePath}/%(title)s.%(ext)s")
+            val settings = SettingsDataStore(context)
+            val (qualityPref, fallbackPref) = runBlocking {
+                settings.ytQualityFlow.first() to settings.ytFallbackFlow.first()
+            }
+
+            val formatOption = buildFormatOption(qualityPref, fallbackPref)
+
+            val request = YoutubeDLRequest(videoUrl).apply {
+                addOption("-f", formatOption)
+                addOption("-o", "${downloadsDir.absolutePath}/%(title)s.%(ext)s")
+            }
 
             val response = YoutubeDL.getInstance().execute(request) { progress, _, _ ->
                 val percent = (progress * 100).toInt().coerceIn(0, 100)
@@ -79,10 +90,8 @@ class VideoDownloadWorker(
             }
 
             Log.d("YouTubeDL", "Download complete: ${response.out}")
-
             val downloadedFile = File(downloadsDir, response.out.substringAfterLast("/"))
 
-            // ✅ Update media library so it shows in gallery
             MediaScannerConnection.scanFile(
                 context,
                 arrayOf(downloadedFile.absolutePath),
@@ -110,6 +119,28 @@ class VideoDownloadWorker(
                 .setAutoCancel(true)
             manager.notify(notifId, builder.build())
             Result.retry()
+        }
+    }
+
+    private fun buildFormatOption(qualityPref: String?, fallbackPref: String?): String {
+        val qualities = listOf("1080", "720", "480", "360")
+        val fallbackSorted = when (fallbackPref ?: "next-lower") {
+            "next-higher" -> qualities.sortedBy { it.toInt() }
+            else -> qualities.sortedByDescending { it.toInt() }
+        }
+
+        return if (qualityPref == "BEST") {
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4"
+        } else {
+            val base = qualityPref?.filter { it.isDigit() }?.toIntOrNull() ?: 720
+            val fallbackHeights = fallbackSorted.filter {
+                if ((fallbackPref ?: "next-lower") == "next-higher") it.toInt() >= base
+                else it.toInt() <= base
+            }
+
+            fallbackHeights.joinToString("/") {
+                "bestvideo[height<=${it}][ext=mp4]+bestaudio[ext=m4a]/mp4"
+            }
         }
     }
 }
