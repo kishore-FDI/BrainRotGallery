@@ -1,11 +1,7 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from mangum import Mangum
+from flask import Flask, jsonify
 
-app = FastAPI()
+app = Flask(__name__)
 
-@app.get("/")
+@app.route("/")
 def read_root():
-    return JSONResponse(content={"message": "Hello from FastAPI on Vercel!"})
-
-handler = Mangum(app)
+    return jsonify({"message": "Hello from Flask on Vercel!"})
