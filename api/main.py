@@ -1,7 +1,11 @@
-from flask import Flask, jsonify
+from flask import Flask
 
 app = Flask(__name__)
 
-@app.route("/")
-def read_root():
-    return jsonify({"message": "Hello from Flask on Vercel!"})
+@app.route('/')
+def home():
+    return 'Hello, World!'
+
+@app.route('/about')
+def about():
+    return 'About'
