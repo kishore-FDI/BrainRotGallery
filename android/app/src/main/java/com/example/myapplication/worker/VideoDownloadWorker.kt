@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.Environment
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.datastore.preferences.core.edit
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import com.example.myapplication.R
@@ -41,9 +40,42 @@ class VideoDownloadWorker(
         }
     }
 
+    private fun isYouTubeUrl(url: String): Boolean {
+        return url.contains("youtube.com") || url.contains("youtu.be")
+    }
+
+    private fun showNotAvailableNotification(url: String) {
+        val channelId = "video_download_channel"
+        val notifId = url.hashCode()
+
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Video Downloads",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            manager.createNotificationChannel(channel)
+        }
+
+        val builder = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Download Not Supported")
+            .setContentText("Currently not available for this site.")
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+
+        manager.notify(notifId, builder.build())
+    }
+
     override fun doWork(): Result {
         val rawUrl = inputData.getString("video_url") ?: return Result.failure()
         val videoUrl = normalizeUrl(rawUrl)
+
+        if (!isYouTubeUrl(videoUrl)) {
+            showNotAvailableNotification(videoUrl)
+            return Result.failure()
+        }
 
         val channelId = "video_download_channel"
         val notifId = videoUrl.hashCode()
@@ -90,14 +122,26 @@ class VideoDownloadWorker(
             }
 
             Log.d("YouTubeDL", "Download complete: ${response.out}")
-            val downloadedFile = File(downloadsDir, response.out.substringAfterLast("/"))
+            val outputPath = response.out.trim()
+            val downloadedFile = File(outputPath)
 
-            MediaScannerConnection.scanFile(
-                context,
-                arrayOf(downloadedFile.absolutePath),
-                arrayOf("video/mp4"),
-                null
-            )
+            val mimeType = when (downloadedFile.extension.lowercase()) {
+                "mp4" -> "video/mp4"
+                "webm" -> "video/webm"
+                "mkv" -> "video/x-matroska"
+                else -> "video/*"
+            }
+
+            if (downloadedFile.exists()) {
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(downloadedFile.absolutePath),
+                    arrayOf(mimeType),
+                    null
+                )
+            } else {
+                Log.w("YouTubeDL", "Downloaded file not found: $outputPath")
+            }
 
             builder.setProgress(0, 0, false)
                 .setContentTitle("Download Complete")

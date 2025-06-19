@@ -73,6 +73,7 @@ dependencies {
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlVersion")
     implementation("io.github.junkfood02.youtubedl-android:aria2c:$youtubedlVersion")
     implementation("androidx.datastore:datastore-preferences:1.1.0")
+    implementation("com.squareup.okhttp3:okhttp:4.9.3")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
