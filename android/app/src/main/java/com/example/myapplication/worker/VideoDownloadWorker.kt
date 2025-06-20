@@ -20,9 +20,13 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
-import okhttp3
-import okio
-import org.json
+import java.io.FileOutputStream
+import java.io.InputStream
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaType
+import org.json.JSONObject
 
 class VideoDownloadWorker(
     private val context: Context,
@@ -157,30 +161,42 @@ class VideoDownloadWorker(
             } else {
                 // --- Non-YouTube: Use API ---
                 try {
-                    val client = okhttp3.OkHttpClient()
-                    val requestBody = okhttp3.MediaType.parse("application/json")?.let {
-                        okhttp3.RequestBody.create(it, "{\"url\":\"$videoUrl\"}")
-                    } ?: return Result.failure()
-                    val request = okhttp3.Request.Builder()
+                    val client = OkHttpClient()
+
+                    // Create JSON request body using modern approach
+                    val jsonMediaType = "application/json".toMediaType()
+                    val requestBody = "{\"url\":\"$videoUrl\"}".toRequestBody(jsonMediaType)
+
+                    val request = Request.Builder()
                         .url("https://brain-rot-gallery.vercel.app/")
                         .post(requestBody)
                         .build()
+
                     val response = client.newCall(request).execute()
-                    if (!response.isSuccessful) throw Exception("API call failed: ${response.code()}")
-                    val body = response.body()?.string() ?: throw Exception("Empty API response")
-                    val directUrl = org.json.JSONObject(body).optString("response")
+                    if (!response.isSuccessful) throw Exception("API call failed: ${response.code}")
+
+                    val body = response.body?.string() ?: throw Exception("Empty API response")
+                    val directUrl = JSONObject(body).optString("response")
                     if (!directUrl.startsWith("http")) throw Exception("API did not return a direct video URL: $directUrl")
 
-                    // Download the video file
-                    val fileName = "video_${System.currentTimeMillis()}.mp4" // fallback name
+                    // Download the video file using modern approach
+                    val fileName = "video_${System.currentTimeMillis()}.mp4"
                     val file = File(downloadsDir, fileName)
-                    val videoReq = okhttp3.Request.Builder().url(directUrl).build()
+
+                    val videoReq = Request.Builder().url(directUrl).build()
                     val videoResp = client.newCall(videoReq).execute()
-                    if (!videoResp.isSuccessful) throw Exception("Video download failed: ${videoResp.code()}")
-                    val sink = okio.Okio.sink(file)
-                    val bufferedSink = okio.Okio.buffer(sink)
-                    videoResp.body()?.source()?.let { bufferedSink.writeAll(it) }
-                    bufferedSink.close()
+                    if (!videoResp.isSuccessful) throw Exception("Video download failed: ${videoResp.code}")
+
+                    // Use standard Java I/O instead of deprecated Okio
+                    val inputStream: InputStream = videoResp.body?.byteStream()
+                        ?: throw Exception("No response body")
+                    val outputStream = FileOutputStream(file)
+
+                    inputStream.use { input ->
+                        outputStream.use { output ->
+                            input.copyTo(output)
+                        }
+                    }
 
                     // Scan file
                     MediaScannerConnection.scanFile(
