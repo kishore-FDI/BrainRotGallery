@@ -20,6 +20,9 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
+import okhttp3
+import okio
+import org.json
 
 class VideoDownloadWorker(
     private val context: Context,
@@ -72,11 +75,6 @@ class VideoDownloadWorker(
         val rawUrl = inputData.getString("video_url") ?: return Result.failure()
         val videoUrl = normalizeUrl(rawUrl)
 
-        if (!isYouTubeUrl(videoUrl)) {
-            showNotAvailableNotification(videoUrl)
-            return Result.failure()
-        }
-
         val channelId = "video_download_channel"
         val notifId = videoUrl.hashCode()
 
@@ -103,59 +101,113 @@ class VideoDownloadWorker(
             val downloadsDir =
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
 
-            val settings = SettingsDataStore(context)
-            val (qualityPref, fallbackPref) = runBlocking {
-                settings.ytQualityFlow.first() to settings.ytFallbackFlow.first()
-            }
+            if (isYouTubeUrl(videoUrl)) {
+                val settings = SettingsDataStore(context)
+                val (qualityPref, fallbackPref) = runBlocking {
+                    settings.ytQualityFlow.first() to settings.ytFallbackFlow.first()
+                }
 
-            val formatOption = buildFormatOption(qualityPref, fallbackPref)
+                val formatOption = buildFormatOption(qualityPref, fallbackPref)
 
-            val request = YoutubeDLRequest(videoUrl).apply {
-                addOption("-f", formatOption)
-                addOption("-o", "${downloadsDir.absolutePath}/%(title)s.%(ext)s")
-            }
+                val request = YoutubeDLRequest(videoUrl).apply {
+                    addOption("-f", formatOption)
+                    addOption("-o", "${downloadsDir.absolutePath}/%(title)s.%(ext)s")
+                }
 
-            val response = YoutubeDL.getInstance().execute(request) { progress, _, _ ->
-                val percent = (progress * 100).toInt().coerceIn(0, 100)
-                builder.setProgress(100, percent, false)
+                val response = YoutubeDL.getInstance().execute(request) { progress, _, _ ->
+                    val percent = (progress * 100).toInt().coerceIn(0, 100)
+                    builder.setProgress(100, percent, false)
+                    manager.notify(notifId, builder.build())
+                }
+
+                Log.d("YouTubeDL", "Download complete: ${response.out}")
+                val outputPath = response.out.trim()
+                val downloadedFile = File(outputPath)
+
+                val mimeType = when (downloadedFile.extension.lowercase()) {
+                    "mp4" -> "video/mp4"
+                    "webm" -> "video/webm"
+                    "mkv" -> "video/x-matroska"
+                    else -> "video/*"
+                }
+
+                if (downloadedFile.exists()) {
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(downloadedFile.absolutePath),
+                        arrayOf(mimeType),
+                        null
+                    )
+                } else {
+                    Log.w("YouTubeDL", "Downloaded file not found: $outputPath")
+                }
+
+                builder.setProgress(0, 0, false)
+                    .setContentTitle("Download Complete")
+                    .setContentText("Saved to Downloads")
+                    .setAutoCancel(true)
                 manager.notify(notifId, builder.build())
-            }
 
-            Log.d("YouTubeDL", "Download complete: ${response.out}")
-            val outputPath = response.out.trim()
-            val downloadedFile = File(outputPath)
+                runBlocking {
+                    val db = AppDatabase.getInstance(context)
+                    db.linkDao().insert(LinkEntity(url = videoUrl))
+                }
 
-            val mimeType = when (downloadedFile.extension.lowercase()) {
-                "mp4" -> "video/mp4"
-                "webm" -> "video/webm"
-                "mkv" -> "video/x-matroska"
-                else -> "video/*"
-            }
-
-            if (downloadedFile.exists()) {
-                MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(downloadedFile.absolutePath),
-                    arrayOf(mimeType),
-                    null
-                )
+                Result.success()
             } else {
-                Log.w("YouTubeDL", "Downloaded file not found: $outputPath")
+                // --- Non-YouTube: Use API ---
+                try {
+                    val client = okhttp3.OkHttpClient()
+                    val requestBody = okhttp3.MediaType.parse("application/json")?.let {
+                        okhttp3.RequestBody.create(it, "{\"url\":\"$videoUrl\"}")
+                    } ?: return Result.failure()
+                    val request = okhttp3.Request.Builder()
+                        .url("https://brain-rot-gallery.vercel.app/")
+                        .post(requestBody)
+                        .build()
+                    val response = client.newCall(request).execute()
+                    if (!response.isSuccessful) throw Exception("API call failed: ${response.code()}")
+                    val body = response.body()?.string() ?: throw Exception("Empty API response")
+                    val directUrl = org.json.JSONObject(body).optString("response")
+                    if (!directUrl.startsWith("http")) throw Exception("API did not return a direct video URL: $directUrl")
+
+                    // Download the video file
+                    val fileName = "video_${System.currentTimeMillis()}.mp4" // fallback name
+                    val file = File(downloadsDir, fileName)
+                    val videoReq = okhttp3.Request.Builder().url(directUrl).build()
+                    val videoResp = client.newCall(videoReq).execute()
+                    if (!videoResp.isSuccessful) throw Exception("Video download failed: ${videoResp.code()}")
+                    val sink = okio.Okio.sink(file)
+                    val bufferedSink = okio.Okio.buffer(sink)
+                    videoResp.body()?.source()?.let { bufferedSink.writeAll(it) }
+                    bufferedSink.close()
+
+                    // Scan file
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(file.absolutePath),
+                        arrayOf("video/mp4"),
+                        null
+                    )
+
+                    builder.setProgress(0, 0, false)
+                        .setContentTitle("Download Complete")
+                        .setContentText("Saved to Downloads")
+                        .setAutoCancel(true)
+                    manager.notify(notifId, builder.build())
+
+                    runBlocking {
+                        val db = AppDatabase.getInstance(context)
+                        db.linkDao().insert(LinkEntity(url = videoUrl))
+                    }
+
+                    Result.success()
+                } catch (e: Exception) {
+                    Log.e("API", "Error: ${e.message}")
+                    showNotAvailableNotification(videoUrl)
+                    Result.failure()
+                }
             }
-
-            builder.setProgress(0, 0, false)
-                .setContentTitle("Download Complete")
-                .setContentText("Saved to Downloads")
-                .setAutoCancel(true)
-            manager.notify(notifId, builder.build())
-
-            runBlocking {
-                val db = AppDatabase.getInstance(context)
-                db.linkDao().insert(LinkEntity(url = videoUrl))
-            }
-
-            Result.success()
-
         } catch (e: YoutubeDLException) {
             Log.e("YouTubeDL", "Error: ${e.message}")
             builder.setContentTitle("Download Failed")

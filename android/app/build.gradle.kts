@@ -74,6 +74,8 @@ dependencies {
     implementation("io.github.junkfood02.youtubedl-android:aria2c:$youtubedlVersion")
     implementation("androidx.datastore:datastore-preferences:1.1.0")
     implementation("com.squareup.okhttp3:okhttp:4.9.3")
+    implementation("org.json:json:20210307")
+    implementation("com.squareup.okio:okio:2.10.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
