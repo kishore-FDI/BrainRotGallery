@@ -1,4 +1,7 @@
-Flask==3.0.3
-yt-dlp>=2023.3.4
+flask
+flask-cors
+yt-dlp
+tenacity
 instaloader
 phub
+werkzeug  # Required by Flask

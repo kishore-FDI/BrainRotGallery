@@ -1,13 +1,10 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import logging
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 import yt_dlp
 
 app = Flask(__name__)
 CORS(app)
-
-logging.basicConfig(level=logging.INFO)
 
 # Custom exception
 class UnsupportedPlatformException(Exception): pass
@@ -25,8 +22,7 @@ def home():
             return jsonify({'response': response})
         except UnsupportedPlatformException as e:
             return jsonify({"response": str(e)}), 400
-        except Exception as e:
-            logging.exception("Unexpected error occurred")
+        except Exception:
             return jsonify({"response": "Something went wrong"}), 500
 
     return jsonify({'message': 'This is a GET request.'})
