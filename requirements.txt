@@ -1,4 +1,4 @@
-flask
+Flask==3.0.3
 flask-cors
 yt-dlp
 tenacity
