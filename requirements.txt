@@ -1,2 +1,4 @@
 Flask==3.0.3
 yt-dlp>=2023.3.4
+instaloader
+phub
